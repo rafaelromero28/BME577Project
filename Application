@@ -1,0 +1,831 @@
+library(shiny)
+library(shinydashboard)
+library(ggplot2)
+library(googledrive)
+library(googlesheets4)
+library(rsconnect)
+library(devtools)
+library(DT)
+
+# The csv files are stored and read from a google sheet from drive
+patients <- read_sheet("https://docs.google.com/spreadsheets/d/1NomOt-qd2ASINUMvbzEbDMncQP1uAFSl1JY2zsNCP9c/edit?usp=sharing")
+provider <- read_sheet("https://docs.google.com/spreadsheets/d/1NomOt-qd2ASINUMvbzEbDMncQP1uAFSl1JY2zsNCP9c/edit?usp=sharing", sheet = 2)
+countycity <- read_sheet("https://docs.google.com/spreadsheets/d/1NomOt-qd2ASINUMvbzEbDMncQP1uAFSl1JY2zsNCP9c/edit?usp=sharing", sheet = 3)
+
+#Makes county and cites into a datatable to be displayed in a later tab
+citytable <- c(countycity$CITY)
+citytable <- sort(citytable)
+
+
+#Defines UI for application that draws a histogram
+ui <- dashboardPage(
+    dashboardHeader(title = "SDR Healthcare"), #Enables the dashboard header feature
+    dashboardSidebar( #Enables the sidemenu feature containing tabs
+        sidebarMenu(id = "tabs", 
+                    menuItem("Welcome", tabName = "welcome", icon = icon("address-card")), #This is the welcom tab contains main info
+                    menuItem("Analysis", tabName = "analysis", icon = icon("chart-bar")),  #This is the welcom tab contains analysis based on demographics
+                    menuItem("Providers", tabName = "providers", icon = icon("notes-medical")), #This is the welcom tab contains providers based on location
+                    menuItem("Compare Me", tabName = "compareMe", icon = icon("users"))         #This is the compareMe tab contains analysis based on your demographics and how you compare
+        )),
+    dashboardBody(
+        tabItems(
+            #Tab 1 Welcome 
+            tabItem(tabName = "welcome",
+                    #Displays information on home tab with general information and graphics about the app
+                    tags$h1("Massachusetts Healthcare Expenses of Residents Based on Gender and Race", align = "middle", style = "color:black"),
+                    hr(),      # This just enters space line involved
+                    tags$h4("To analyze and determine discreptencies in healthcare expenses for the residents of Massachusetts",align = "middle", style = "color:dodgerblue"),
+                    tags$br(), # This just enters space no line involved
+                    tags$h4("Welcome! Please proceed to the Analysis tab to select a specific demographic and see a comparison of healthcare expenses among those individuals by county. To see providers and specialist in your county and city please proceed to the Providers tab. To see more personalized information, proceed to the Compare Me tab to see how your expenses compare.", align = "middle"),
+                    tags$br(), # This just enters space no line involved
+                    fluidRow(column(width = 8, offset = 2, align = "middle", 
+                                    tags$img(height = 175, width = 175, src = "https://upload.wikimedia.org/wikipedia/commons/8/82/Seal_of_Massachusetts.svg"),),
+                    ),
+                    tags$br(),
+                    tags$br(),
+                    
+                    #Map and Infoboxes 
+                    fluidRow(align = "center", box(width = 7, align = "middle", column(12, align = "center", tags$img(height = 380, width = 625, src = "https://framinghamsource.com/wp-content/uploads/2021/04/massachusetts-county-map.jpg"))),
+                             infoBox(tags$h4("Population"),value = ("6,893,000"), icon = icon("city"), color = "red"),
+                             infoBox(tags$h4("Counties"), 14, icon = icon("map-marker-alt"), color = "blue"),
+                             infoBox(tags$h4("Healthcare Spending"), value = "$64.1 Billion", icon = icon("heart"), color = "fuchsia"),
+                             infoBox(tags$h4("Uninsured"), value = "200,000 People", icon = icon("python"), color = "green"),
+                    ),
+                    tags$br(),
+                    tags$br(),
+                    
+                    #Buttons to navigate to different tabs on the main home tab with short descriptions
+                    fluidRow(column(12, align = "center",
+                                    column( 4, 
+                                            box(title = "Analysis", width = 150, height = 180, status = "primary", solidHeader = TRUE,
+                                                tags$h4("To look at population data in regards to each county click here"),
+                                                tags$br(),
+                                                actionButton("button", "Click Here", width = 150),
+                                                tags$br(),
+                                                tags$br(), 
+                                            )),
+                                    column(4, 
+                                           box(title = "Providers", width = 150, height = 180, status = "primary", solidHeader = TRUE,
+                                               tags$h4("To see how providers compare to others around the state click here"),
+                                               tags$br(),
+                                               actionButton("button3", "Click Here", width = 150),
+                                               tags$br(),
+                                               tags$br(), 
+                                           )),
+                                    column(4, 
+                                           box(title = "Compare Me", width = 150, height = 180, status = "primary", solidHeader = TRUE,
+                                               tags$h4("To see how you compare to others around you click here"),
+                                               tags$br(),
+                                               actionButton("button2", "Click Here", width = 150),
+                                               tags$br(),
+                                               tags$br(), 
+                                           ))
+                    ))
+            ),
+            
+            #Tab 2 Analysis 
+            tabItem(tabName = "analysis",
+                    #Displays information on analysis tab with information and graphs associated with coverage, expenses for demographics 
+                    tags$h1("Analysis", align = "middle", style = "color:black"),
+                    fluidRow(tags$h4("This tool will provide you with data regarding the coverage and expenses of the selected demographic across Massachusettes counties ", align = "middle", style = "color:gray10")),
+                    tags$br(),
+                    sidebarLayout(
+                        
+                        sidebarPanel( 
+                            #Input for gender and race to display data
+                            tags$h2("Select a Demographic", align = "middle", style = "color:gray10"),
+                            tags$br(),
+                            selectInput(inputId = "genderInput","Select a gender",list("Male", "Female")),
+                            tags$br(),
+                            selectInput(inputId = "raceInput","Select a race",list("White", "Asian", "Black", "Native", "Other")),
+                            tags$br(),
+                            
+                            #Update Button to update data with new selection
+                            fluidRow(column(width = 8, offset = 2, align = "middle", actionButton(inputId = "start", label = "Update Data"))), 
+                            tags$br(),
+                            tags$br(),
+                            tags$br(),
+                            
+                            #World Health Organization Logo for overall looks
+                            fluidRow(column(width = 8, offset = .5, align = "middle", 
+                                            tags$img(height = 200, width = 325, src = "https://logos-world.net/wp-content/uploads/2021/03/World-Health-Organization-WHO-Emblem.png")),
+                            ),
+                            tags$br(),
+                            tags$br(),
+                        ),
+                        
+                       #This displays all three graphs and data table in tabs on main panel
+                        mainPanel(
+                            fluidRow(column(width = 12,
+                                            #Displays graphs and data for expenses and coverage
+                                            tabBox(
+                                                title = " ", id = "tabset1", height = 590, width = 11,
+                                                tabPanel("Coverage Per County", fluidRow(column(width = 12, align = "middle",plotOutput(outputId = "barplot1", height = 590)))),
+                                                tabPanel("Expenses Per County", fluidRow(column(width = 12, align = "middle",plotOutput(outputId = "barplot2", height = 590)))),
+                                                tabPanel("Coverage/Expenses Per County", fluidRow(column(width = 12, align = "middle",plotOutput(outputId = "barplot3", height = 590)))),
+                                                tabPanel("Data Table", fluidRow(column(width = 12, align = "middle", DT::dataTableOutput("mytable"), height = 590)))),
+                            ),
+                            ),
+                            tags$br(),
+                            tags$br(),
+                        ),
+                        
+                        
+                    )
+            ), 
+            
+            #Tab 3 Providers 
+            tabItem(tabName = "providers",
+                    
+                    sidebarLayout(
+                        sidebarPanel( 
+                            #Input for gender and race
+                            tags$h2("Select a Location", align = "middle", style = "color:gray10"),
+                            tags$br(),
+                            selectInput(inputId = "county3Input","Select a county",list("Barnstable County", "Berkshire County", "Bristol County", "Dukes County", "Essex County", "Franklin County", "Hampden County", "Hampshire County", "Middlesex County", "Nantucket County", "Norfolk County", "Plymouth County", "Suffolk County", "Worcester County")),
+                            tags$br(),
+                            selectInput(inputId = "city3Input","Enter a city",choices = citytable),
+                            tags$br(),
+                            
+                            #Update Button to update data with new selection
+                            fluidRow(column(width = 8, offset = 2, align = "middle", actionButton(inputId = "tellmewhentogo", label = "Update Data"))), 
+                            tags$br(),
+                            
+                            fluidRow(column(width = 12, offset = 0, align = "left", 
+                                            tags$h5("*Graphics will not display without an input selected and Update Data pressed"), 
+                                            tags$h5("*Provider by City and Specialist in a County only updates with Select a county"),
+                                            tags$h5("*Specialist in a City only updates with Enter a City"),
+                                            )), 
+                            
+                            #Displays providers in each county graph under update button
+                            tags$br(),
+                            fluidRow(column(width = 8, offset = 0, align = "middle", 
+                                            plotOutput(outputId = "barplot5", height = 300, width = 330)),
+                            ),
+                           
+                        ),
+                        
+                        #This displays all three graphs and data table in tabs on main panel
+                        mainPanel(
+                            fluidRow(column(width = 12,
+                                            tags$h1("Providers", align = "middle", style = "color:black"),
+                                            fluidRow(tags$h5("Select a county and city to see the data regarding the number or type of healthcare providers in your neighborhood", align = "middle", style = "color:gray10")),
+                                            tags$br(),
+                                            tabBox(
+                                                title = " ", id = "tabset1", height = 600, width = 11,
+                                                tabPanel(paste0("Providers by City"), fluidRow(column(width = 12, align = "middle",plotOutput(outputId = "barplot6", height = 500), 
+                                                    tags$h4("This graphic displays the registered providers in a city for a county, when a Massachusetts county and city are selected. The pie chart includes the top ranking cities for any given county", align = "middle", style = "color:gray10"),
+                                                
+                                                    ))),
+                                                tabPanel("Specialists in a County", fluidRow(column(width = 12, align = "middle",plotOutput(outputId = "barplot8", height = 500), 
+                                                    tags$h4("TThis graphic displays the providers’ specialties and the amount of registered specialists in a county, when a Massachusetts county is selected and a city is entered", align = "middle", style = "color:gray10"),
+                                                  
+                                                    ))),
+                                                tabPanel("Specialists in a City", fluidRow(column(width = 12, align = "middle",plotOutput(outputId = "barplot9", height = 500), 
+                                                    tags$h4("The graphic displays the providers’ specialties and the amount of registered specialists in a city, when a Massachusetts county is selected and a city is entered", align = "middle", style = "color:gray10"),
+                                
+                                                    ))),
+                                                tabPanel("City Search", fluidRow(column(width = 12, align = "middle", DT::dataTableOutput("mytable2"), height = 500),
+                                                    tags$br(),
+                                                    tags$h4("This data table displays all the cities and their associated counties for your reference", align = "middle", style = "color:gray10"),
+                                                )),
+                                            ),
+                            ),
+                            tags$br(),
+                            tags$br(),
+                            ),
+                            
+                            
+                        )
+                    )),
+            
+            #Tab 4 Compare Me 
+            tabItem(tabName = "compareMe",
+                    tags$h1("Compare your own coverage", align = "middle", style = "color:black"),
+                    hr(),
+                    tags$h4("Please insert your information to see how you rank amongst those in your state in regards to race, gender, county and population", align = "middle", style = "color:gray10"),
+                    hr(),
+                    sidebarLayout(
+                        sidebarPanel( 
+                            tags$h2("Insert your info below", align = "middle", style = "color:gray10"),
+                            tags$br(),
+                            selectInput(inputId = "gender2Input","Select your gender",list("Male", "Female")),
+                            tags$br(),
+                            selectInput(inputId = "race2Input","Select your race",list("White", "Asian", "Black", "Native", "Other")),
+                            tags$br(),
+                            selectInput(inputId = "countyInput","Select your county",list("Barnstable County", "Berkshire County", "Bristol County", "Dukes County", "Essex County", "Franklin County", "Hampden County", "Hampshire County", "Middlesex County", "Nantucket County", "Norfolk County", "Plymouth County", "Suffolk County", "Worcester County")),
+                            tags$br(),
+                            sliderInput("expInput", "Insert your Healthcare Expenses ($)", value = 500000, min = 0, max = 1000000),
+                            tags$br(),
+                            sliderInput("covInput", "Insert your Healthcare Coverage ($)", value = 25000, min = 0, max = 50000),
+                            tags$br(),
+                            fluidRow(column(width = 8, offset = 2, align = "middle", actionButton(inputId = "go", label = "Update Data"))), 
+                            
+                        ),
+                        
+                        mainPanel(
+                            tags$h3(textOutput("tOutput"), align = "middle", style = "color:gray10"),
+                            tags$br(),
+                            fluidRow(
+                                column(12, offset = 2, align = "center",
+                                       infoBoxOutput("percentBox"),
+                                       infoBoxOutput("percentgBox"),
+                                )),
+                            fluidRow(
+                                column(12, offset = 2, align = "center",
+                                       infoBoxOutput("percentrBox"),
+                                       infoBoxOutput("percentcBox"),
+                                )),
+                            tags$br(),
+                            tags$br(),
+                            tags$h3(textOutput("t2Output"), align = "middle", style = "color:gray10"),
+                            tags$br(),
+                            fluidRow(
+                                column(12, offset = 2, align = "center",
+                                       infoBoxOutput("percent2Box"),
+                                       infoBoxOutput("percentg2Box"),
+                                )),
+                            fluidRow(column(12, offset = 2, align = "center",
+                                            infoBoxOutput("percentr2Box"),
+                                            infoBoxOutput("percentc2Box"),
+                            )),
+                            
+                            
+                        )
+                    )
+            )
+        ))
+)
+
+# Define server logic required to plot graphs, display data, etc
+server <- function(input, output, session) {
+    
+    #Mainpage buttons to navigate to specific tabs
+    observeEvent(input$button, {
+        updateTabItems(session, "tabs", "analysis")
+    })  
+    
+    observeEvent(input$button2, {
+        updateTabItems(session, "tabs", "compareMe")
+    }) 
+    
+    observeEvent(input$button3, {
+        updateTabItems(session, "tabs", "providers")
+    }) 
+    
+    observeEvent(input$start, { #Waits for update button to be pressed to run code below
+        
+        #Subsets data based on gender and race
+        gender <- subset(patients, patients$GENDER == input$genderInput)
+        race <- subset(gender, gender$RACE == input$raceInput)
+        
+        #Subsets race data based on county
+        c1 <- subset(race, race$COUNTY == "Barnstable County")
+        c2 <- subset(race, race$COUNTY == "Berkshire County")
+        c3 <- subset(race, race$COUNTY == "Bristol County")
+        c4 <- subset(race, race$COUNTY == "Dukes County")
+        c5 <- subset(race, race$COUNTY == "Essex County")
+        c6 <- subset(race, race$COUNTY == "Franklin County")
+        c7 <- subset(race, race$COUNTY == "Hampden County")
+        c8 <- subset(race, race$COUNTY == "Hampshire County")
+        c9 <- subset(race, race$COUNTY == "Middlesex County")
+        c10 <- subset(race, race$COUNTY == "Nantucket County")
+        c11 <- subset(race, race$COUNTY == "Norfolk County")
+        c12 <- subset(race, race$COUNTY == "Plymouth County")
+        c13 <- subset(race, race$COUNTY == "Suffolk County")
+        c14 <- subset(race, race$COUNTY == "Worcester County")
+        
+        #Calculates average expenses for each county
+        exp1 = ceiling(mean(c1$HEALTHCARE_EXPENSES))
+        exp2 = ceiling(mean(c2$HEALTHCARE_EXPENSES))
+        exp3 = ceiling(mean(c3$HEALTHCARE_EXPENSES))
+        exp4 = ceiling(mean(c4$HEALTHCARE_EXPENSES))
+        exp5 = ceiling(mean(c5$HEALTHCARE_EXPENSES))
+        exp6 = ceiling(mean(c6$HEALTHCARE_EXPENSES))
+        exp7 = ceiling(mean(c7$HEALTHCARE_EXPENSES))
+        exp8 = ceiling(mean(c8$HEALTHCARE_EXPENSES))
+        exp9 = ceiling(mean(c9$HEALTHCARE_EXPENSES))
+        exp10 = ceiling(mean(c10$HEALTHCARE_EXPENSES))
+        exp11 = ceiling(mean(c11$HEALTHCARE_EXPENSES))
+        exp12 = ceiling(mean(c12$HEALTHCARE_EXPENSES))
+        exp13 = ceiling(mean(c13$HEALTHCARE_EXPENSES))
+        exp14 = ceiling(mean(c14$HEALTHCARE_EXPENSES))
+        
+        #Calculates average coverage for each county
+        cov1 = ceiling(mean(c1$HEALTHCARE_COVERAGE))
+        cov2 = ceiling(mean(c2$HEALTHCARE_COVERAGE))
+        cov3 = ceiling(mean(c3$HEALTHCARE_COVERAGE))
+        cov4 = ceiling(mean(c4$HEALTHCARE_COVERAGE))
+        cov5 = ceiling(mean(c5$HEALTHCARE_COVERAGE))
+        cov6 = ceiling(mean(c6$HEALTHCARE_COVERAGE))
+        cov7 = ceiling(mean(c7$HEALTHCARE_COVERAGE))
+        cov8 = ceiling(mean(c8$HEALTHCARE_COVERAGE))
+        cov9 = ceiling(mean(c9$HEALTHCARE_COVERAGE))
+        cov10 = ceiling(mean(c10$HEALTHCARE_COVERAGE))
+        cov11 = ceiling(mean(c11$HEALTHCARE_COVERAGE))
+        cov12 = ceiling(mean(c12$HEALTHCARE_COVERAGE))
+        cov13 = ceiling(mean(c13$HEALTHCARE_COVERAGE))
+        cov14 = ceiling(mean(c14$HEALTHCARE_COVERAGE))
+        
+        #Number of people in each county
+        v1 = length(c1$HEALTHCARE_COVERAGE)
+        v2 = length(c2$HEALTHCARE_COVERAGE)
+        v3 = length(c3$HEALTHCARE_COVERAGE)
+        v4 = length(c4$HEALTHCARE_COVERAGE)
+        v5 = length(c5$HEALTHCARE_COVERAGE)
+        v6 = length(c6$HEALTHCARE_COVERAGE)
+        v7 = length(c7$HEALTHCARE_COVERAGE)
+        v8 = length(c8$HEALTHCARE_COVERAGE)
+        v9 = length(c9$HEALTHCARE_COVERAGE)
+        v10 = length(c10$HEALTHCARE_COVERAGE)
+        v11 = length(c11$HEALTHCARE_COVERAGE)
+        v12 = length(c12$HEALTHCARE_COVERAGE)
+        v13 = length(c13$HEALTHCARE_COVERAGE)
+        v14 = length(c14$HEALTHCARE_COVERAGE)
+        
+        #Stores average data into lists of coverage and expenses
+        Expenses <- c(exp1, exp2, exp3, exp4, exp5, exp6, exp7, exp8, exp9, exp10, exp11, exp12, exp13, exp14)
+        Coverage <- c(cov1, cov2, cov3, cov4, cov5, cov6, cov7, cov8, cov9, cov10, cov11, cov12, cov13, cov14)
+        People <- c(v1, v2, v3, v4, v5, v6, v7,v8, v9, v10, v11, v12, v13, v14)
+        
+        #Stores county names into list
+        Counties <- c("Barnstable County", "Berkshire County", "Bristol County", "Dukes County", "Essex County", "Franklin County", "Hampden County", "Hampshire County", "Middlesex County", "Nantucket County", "Norfolk County", "Plymouth County", "Suffolk County", "Worcester County")
+        
+        #Data for Bar Plots
+        survey <- data.frame(Counties, Expenses, Coverage)
+        survey2 <- data.frame(Type = rep(c("expenses", "coverage"), each = 14), t = c(Counties, Counties), u = c(Expenses, Coverage))
+        survey3 <- data.frame(Counties, People, Expenses, Coverage)
+        
+        #Barplot of Coverage per county
+        output$barplot1 <- renderPlot({(ggplot(survey, aes(x= Counties, y= Coverage, fill= Counties)) +
+                                            geom_bar(stat="identity", width = 0.5) +
+                                            ggtitle("Average Coverage Per County") +
+                                            xlab("Counties") +
+                                            ylab("Coverage ($)") +
+                                            theme_minimal() +
+                                            coord_flip() #flips horizontally
+        )})
+        
+        #Barplot of Expenses per county
+        output$barplot2 <- renderPlot({(ggplot(survey, aes(x= Counties, y= Expenses, fill= Counties)) +
+                                            geom_bar(stat="identity", width = 0.5) +
+                                            ggtitle("Average Expenses Per County") +
+                                            xlab("Counties") +
+                                            ylab("Expenses ($)") +
+                                            theme_minimal() +
+                                            coord_flip() #flips horizontally
+        )})
+        
+        #Grouped Barplot of Expenses/Coverage per county
+        output$barplot3 <- renderPlot({(ggplot(survey2, aes(x=t, y=u, fill=Type)) +
+                                            geom_bar(stat="identity", position=position_dodge()) +
+                                            ggtitle("Coverage and Expense Per County") +
+                                            theme_minimal() +
+                                            xlab("Counties") +
+                                            ylab("Expenses ($)") +
+                                            coord_flip() #flips horizontally
+        )})
+        
+        #Displays Table
+        output$mytable = DT::renderDataTable({
+            survey3
+        })
+        
+    })
+    
+    #Tab 3 Compare Me data 
+    observeEvent(input$go, { #Waits for update button to be pressed to run code below
+        
+        #Subsets of our data based in the following categories
+        patients2 <- patients
+        gender2 <- subset(patients, patients$GENDER == input$gender2Input)
+        race2 <- subset(patients, patients$RACE == input$race2Input)
+        county <- subset(patients, patients$COUNTY == input$countyInput)
+ 
+        
+        #Gather the expenses of demographic
+        percent = calculate(patients2$HEALTHCARE_EXPENSES,input$expInput)  #All Patients
+        percentg = calculate(gender2$HEALTHCARE_EXPENSES,input$expInput)   #Same Gender Patients
+        percentr = calculate(race2$HEALTHCARE_EXPENSES,input$expInput)     #Same race Patients
+        percentc = calculate(county$HEALTHCARE_EXPENSES,input$expInput)    #Same County Patients
+        
+        #Gather the coverage of demographic
+        percent2 = calculate2(patients2$HEALTHCARE_COVERAGE,input$covInput)  #All Patients
+        percentg2 = calculate2(gender2$HEALTHCARE_COVERAGE,input$covInput)  #All Patients
+        percentr2 = calculate2(race2$HEALTHCARE_COVERAGE,input$covInput)  #All Patients
+        percentc2 = calculate2(county$HEALTHCARE_COVERAGE,input$covInput)  #All Patients
+        
+        #Gather the expenses grade of the demographic
+        percent_grade = grade(percent)
+        percentg_grade = grade(percentg)
+        percentr_grade = grade(percentr)
+        percentc_grade = grade(percentc)
+        
+        #Gather the coverage grade of the demographic
+        percent2_grade = grade(percent2)
+        percentg2_grade = grade(percentg2)
+        percentr2_grade = grade(percentr2)
+        percentc2_grade = grade(percentc2)
+        
+        #Gather the expenses color grade of the demographic
+        percent_gradec = colorit(percent)
+        percentg_gradec = colorit(percentg)
+        percentr_gradec = colorit(percentr)
+        percentc_gradec = colorit(percentc)
+        
+        #Gather the coverage color grade of the demographic
+        percent2_gradec = colorit(percent2)
+        percentg2_gradec = colorit(percentg2)
+        percentr2_gradec = colorit(percentr2)
+        percentc2_gradec = colorit(percentc2)
+        
+        #Info boxes for Expenses
+        output$percentBox <- renderInfoBox({
+            boxit("Population", percent, "city", percent_gradec, percent_grade)
+        })
+        output$percentgBox <- renderInfoBox({
+            boxit("Gender", percentg, "venus-mars", percentg_gradec , percentg_grade)
+        })
+        output$percentrBox <- renderInfoBox({
+            boxit("Race", percentr, "users", percentr_gradec, percentr_grade)
+        })
+        output$percentcBox <- renderInfoBox({
+            boxit("County", percentc, "flag", percentc_gradec, percentc_grade)
+        })
+        
+        #Info boxes for Coverage
+        output$percent2Box <- renderInfoBox({
+            boxit("Population", percent2, "city",  percent2_gradec, percent2_grade)
+        })
+        output$percentg2Box <- renderInfoBox({
+            boxit("Gender", percentg2, "venus-mars", percentg2_gradec, percentg2_grade)
+        })
+        output$percentr2Box <- renderInfoBox({
+            boxit("Race", percentr2, "users", percentr2_gradec, percentr2_grade)
+        })
+        output$percentc2Box <- renderInfoBox({
+            boxit("Country", percentc2, "flag", percentc2_gradec, percentc2_grade)
+        })
+        
+        output$countyOutput <- renderText({paste(input$countyInput)})
+        output$expOutput <- renderText({paste(input$expInput)})
+        
+        output$tOutput <- renderText({"This is How You Rank Amongst Your Demographics in Healthcare Expenses"})
+        output$t2Output <- renderText({"This is How You Rank Amongst Your Demographics in Healthcare Coverage"})
+    })
+    
+    #Provider Tabs
+    observeEvent(input$tellmewhentogo, {
+        
+        providers <- provider
+        county3 <- subset(providers, providers$COUNTY == input$county3Input)
+        city3 <-subset(providers, providers$CITY == input$city3Input)
+       
+        
+      
+        
+        cc <- input$county3Input
+        dd <- input$city3Input
+       
+        #Displays Table
+        output$mytable2 = DT::renderDataTable({
+             countycity
+        })
+      
+        
+        #County vs Provider 
+        #Subsets Providers into Counties
+        c20 <- subset(providers, providers$COUNTY == "Barnstable County")
+        c21 <- subset(providers, providers$COUNTY == "Berkshire County")
+        c22 <- subset(providers, providers$COUNTY == "Bristol County")
+        c23 <- subset(providers, providers$COUNTY == "Dukes County")
+        c24 <- subset(providers, providers$COUNTY == "Essex County")
+        c25 <- subset(providers, providers$COUNTY == "Franklin County")
+        c26 <- subset(providers, providers$COUNTY == "Hampden County")
+        c27 <- subset(providers, providers$COUNTY == "Hampshire County")
+        c28 <- subset(providers, providers$COUNTY == "Middlesex County")
+        c29 <- subset(providers, providers$COUNTY == "Nantucket County")
+        c30 <- subset(providers, providers$COUNTY == "Norfolk County")
+        c31 <- subset(providers, providers$COUNTY == "Plymouth County")
+        c32 <- subset(providers, providers$COUNTY == "Suffolk County")
+        c33 <- subset(providers, providers$COUNTY == "Worcester County")
+        
+        #Number of providers per county
+        v20 = length(c20$NAME)
+        v21 = length(c21$NAME)
+        v22 = length(c22$NAME)
+        v23 = length(c23$NAME)
+        v24 = length(c24$NAME)
+        v25 = length(c25$NAME)
+        v26 = length(c26$NAME)
+        v27 = length(c27$NAME)
+        v28 = length(c28$NAME)
+        v29 = length(c29$NAME)
+        v30 = length(c30$NAME)
+        v31 = length(c31$NAME)
+        v32 = length(c32$NAME)
+        v33 = length(c33$NAME)
+        
+        #List of Counties 
+        Counties <- c("Barnstable County", "Berkshire County", "Bristol County", "Dukes County", "Essex County", "Franklin County", "Hampden County", "Hampshire County", "Middlesex County", "Nantucket County", "Norfolk County", "Plymouth County", "Suffolk County", "Worcester County")
+        Providers <- c(v20, v21, v22, v23, v24, v25, v26, v27, v28, v29, v30, v31, v32, v33)
+        
+        #Data for Bar Plots
+        survey10 <- data.frame(Counties, Providers)
+        
+        #Barplot of Providers per County
+        output$barplot5 <- renderPlot({(ggplot(survey10, aes(x= Counties, y= Providers, fill= Counties)) +
+                                            geom_bar(stat="identity", width = 0.5) +
+                                            ggtitle("Number of Providers Per County") +
+                                            xlab("Counties") +
+                                            ylab("Number of Providers Per County") +
+                                            theme_minimal() +
+                                            coord_flip() #flips horizontally
+        )})
+        
+        #Cities vs Providers
+        h <- table(county3$CITY)  #Turns it into data table
+        data <- data.frame(h)
+        
+        data <- data[with(data,order(-Freq)),]
+        data <- data[1:10,]
+        data <- data[!apply(is.na(data), 1, all),]
+        
+        
+        #Displays Pie Graph
+        output$barplot6 <- renderPlot({(ggplot(data, aes(x="", y=Freq, fill= Var1)) +
+                geom_bar(stat="identity", width=1, color="white") +
+                geom_label(aes(label = Freq),
+                    position = position_stack(vjust = 0.5),
+                    show.legend = FALSE) +
+                coord_polar("y", start=0) +
+                theme_void() + # remove background, grid, numeric labels
+                guides(fill = guide_legend(title = paste0("Cities in ", cc)))
+        )})
+        
+        
+        #Zipcodes vs Providers
+        g <- table(as.character(city3$ZIP))
+        data1 <- data.frame(g)
+        
+        data1 <- data1[with(data1,order(-Freq)),]
+        data1 <- data1[1:10,]
+        
+        data1 <- data1[!apply(is.na(data1), 1, all),]
+        
+        #Displays Boujie Pie Graph
+        output$barplot7 <- renderPlot({(ggplot(data1, aes(x="", y=Freq, fill= Var1)) +
+                                            geom_bar(stat="identity", width=1, color="white") +
+                                            geom_label(aes(label = Freq),
+                                                position = position_stack(vjust = 0.5),
+                                                show.legend = FALSE) +
+                                            coord_polar("y", start=0) +
+                                            theme_void() + # remove background, grid, numeric labels
+                                            guides(fill = guide_legend(title = paste0("Zipcodes in ", dd)))
+
+        )})
+        
+        #Provider Specialties
+        #Subsets amiunt of specialit and type in the county
+        s1 <- subset(county3,county3$SPECIALITY == "Cardiovascular Disease (Cardiology)")
+        s2 <- subset(county3,county3$SPECIALITY == "Certified Nurse Midwife")
+        s3 <- subset(county3,county3$SPECIALITY == "Chiropractic")
+        s4 <- subset(county3,county3$SPECIALITY == "Clinical Nurse Specialist")
+        s5 <- subset(county3,county3$SPECIALITY == "Clinical Psychologist")
+        s6 <- subset(county3,county3$SPECIALITY == "Clinical Social Worker")
+        s7 <- subset(county3,county3$SPECIALITY == "Emergency Medicine")
+        s8 <- subset(county3,county3$SPECIALITY == "Family Practice")
+        s9 <- subset(county3,county3$SPECIALITY == "General Practice")
+        s10 <- subset(county3,county3$SPECIALITY == "Internal Medicine")
+        s11 <- subset(county3,county3$SPECIALITY == "Nurse Practitioner")
+        s12 <- subset(county3,county3$SPECIALITY == "Obstetrics/Gynecology")
+        s13 <- subset(county3,county3$SPECIALITY == "Optometry")
+        s14 <- subset(county3,county3$SPECIALITY == "Physical Therapy")
+        s15 <- subset(county3,county3$SPECIALITY == "Physician Assistant")
+        s16 <- subset(county3,county3$SPECIALITY == "Podiatry")
+        s17 <- subset(county3,county3$SPECIALITY == "Psychiatry")
+        s18 <- subset(county3,county3$SPECIALITY == "Allergy/Immunology")
+        
+        #Creates number of specialties in county by type
+        r1 <- length(s1$NAME)
+        r2 <- length(s2$NAME)
+        r3 <- length(s3$NAME)
+        r4 <- length(s4$NAME)
+        r5 <- length(s5$NAME)
+        r6 <- length(s6$NAME)
+        r7 <- length(s7$NAME)
+        r8 <- length(s8$NAME)
+        r9 <- length(s9$NAME)
+        r10 <- length(s10$NAME)
+        r11 <- length(s11$NAME)
+        r12 <- length(s12$NAME)
+        r13 <- length(s13$NAME)
+        r14 <- length(s14$NAME)
+        r15 <- length(s15$NAME)
+        r16 <- length(s16$NAME)
+        r17 <- length(s17$NAME)
+        r18 <- length(s18$NAME)
+        
+        #List used to create specialties and amounts in a city
+        Special <- c("Allergy/Immunology", "Cardiovascular Disease (Cardiology)", "Certified Nurse Midwife","Chiropractic", "Clinical Nurse Specialist","Clinical Psychologist", "Clinical Social Worker", "Emergency Medicine","Family Practice","General Practice", "Internal Medicine","Nurse Practitioner", "Obstetrics/Gynecology", "Optometry","Physical Therapy", "Physician Assistant", "Podiatry","Psychiatry")
+        Amount <- c(r18, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17)
+        
+        #Creates data table of special and amounts
+        survey5 <- data.frame(Special, Amount)
+        
+        #Renders barplot of specialties in a city
+        output$barplot8 <- renderPlot({(
+            ggplot(survey5, aes(x= Special, y= Amount, fill= Amount)) +
+                geom_bar(stat="identity", width = 0.5) +
+                ggtitle(paste0("Number of Specific Specialties in ", cc)) +
+                xlab("Specialties") +
+                ylab("Amount") +
+                theme_minimal() +
+                coord_flip()
+        )})
+        
+        #City vs Providers
+        #Subsets specialities in one city
+        s19 <- subset(city3,city3$SPECIALITY == "Cardiovascular Disease (Cardiology)")
+        s21 <- subset(city3,city3$SPECIALITY == "Certified Nurse Midwife")
+        s31 <- subset(city3,city3$SPECIALITY == "Chiropractic")
+        s41 <- subset(city3,city3$SPECIALITY == "Clinical Nurse Specialist")
+        s51 <- subset(city3,city3$SPECIALITY == "Clinical Psychologist")
+        s61 <- subset(city3,city3$SPECIALITY == "Clinical Social Worker")
+        s71 <- subset(city3,city3$SPECIALITY == "Emergency Medicine")
+        s81 <- subset(city3,city3$SPECIALITY == "Family Practice")
+        s91 <- subset(city3,city3$SPECIALITY == "General Practice")
+        s101 <- subset(city3,city3$SPECIALITY == "Internal Medicine")
+        s111 <- subset(city3,city3$SPECIALITY == "Nurse Practitioner")
+        s121 <- subset(city3,city3$SPECIALITY == "Obstetrics/Gynecology")
+        s131 <- subset(city3,city3$SPECIALITY == "Optometry")
+        s141 <- subset(city3,city3$SPECIALITY == "Physical Therapy")
+        s151 <- subset(city3,city3$SPECIALITY == "Physician Assistant")
+        s161 <- subset(city3,city3$SPECIALITY == "Podiatry")
+        s171 <- subset(city3,city3$SPECIALITY == "Psychiatry")
+        s181 <- subset(city3,city3$SPECIALITY == "Allergy/Immunology")
+        
+        #Determines the number of specialties in a specific city
+        r19 <- length(s19$NAME)
+        r21 <- length(s21$NAME)
+        r31 <- length(s31$NAME)
+        r41 <- length(s41$NAME)
+        r51 <- length(s51$NAME)
+        r61 <- length(s61$NAME)
+        r71 <- length(s71$NAME)
+        r81 <- length(s81$NAME)
+        r91 <- length(s91$NAME)
+        r101 <- length(s101$NAME)
+        r111 <- length(s111$NAME)
+        r121 <- length(s121$NAME)
+        r131 <- length(s131$NAME)
+        r141 <- length(s141$NAME)
+        r151 <- length(s151$NAME)
+        r161 <- length(s161$NAME)
+        r171 <- length(s171$NAME)
+        r181 <- length(s181$NAME)
+        
+        #List to create table of specialist and number of each of them in the city
+        Specialty <- c("Allergy/Immunology", "Cardiovascular Disease (Cardiology)", "Certified Nurse Midwife","Chiropractic", "Clinical Nurse Specialist","Clinical Psychologist", "Clinical Social Worker", "Emergency Medicine","Family Practice","General Practice", "Internal Medicine","Nurse Practitioner", "Obstetrics/Gynecology", "Optometry","Physical Therapy", "Physician Assistant", "Podiatry","Psychiatry")
+        Total <- c(r181, r19, r21, r31, r41, r51, r61, r71, r81, r91, r101, r111, r121, r131, r141, r151, r161, r171)
+        
+        #Creates data table using specialty and total lists
+        survey55 <- data.frame(Specialty, Total)
+        
+        #Renders barplot of specialties for users
+        output$barplot9 <- renderPlot({(
+            ggplot(survey55, aes(x= Specialty, y= Total, fill= Total)) +
+                geom_bar(stat="identity", width = 0.5) +
+                ggtitle(paste0("Number of Specific Specialties in ", dd)) +
+                xlab("Specialties") +
+                ylab("Amount") +
+                theme_minimal() +
+                coord_flip()
+        )})
+    })
+        
+        
+    #Functions
+    #Calculate determines what percentile the user ranks in each category in expenses
+    calculate <- function(a, b) {
+        count = 0
+        
+        for  (i in 1:length(a)) {
+            if(a[i] < b) {
+                count = count + 1
+            }
+        }
+        p = ((length(a) - count) / length(a)) * 100
+        return(p)
+    }
+    
+    #Calculate2 determines what percentile the user ranks in each category in Coverage
+    calculate2 <- function(a, b) {
+        count = 0
+        
+        for (i in 1:length(a)) {
+            if(a[i] < b) {
+                count = count + 1
+            }
+        }
+        p = ((count) / length(a)) * 100
+        return(p)
+    }
+    
+    #Boxit function makes info boxes to be rendered in main panel
+    boxit <- function(name, per, val, col, grade)
+    {
+        box = infoBox(name, grade , subtitle = (paste0("You rank better than ", ceiling(per), "% of people in this group")), icon = icon(val), color = col, width = 18, fill = TRUE)
+        return(box)
+    }
+    
+    #Grade function makes info boxes to be rendered in main panel
+    grade <- function(a) {
+        if (a >= 97) {
+            b = "A+"
+            return(b)
+        }
+        else if (a >= 93) {
+            b = "A"
+            return(b)
+        }
+        else if (a >= 90) {
+            b = "A-"
+            return(b)
+        }
+        else if (a >= 87) {
+            b = "B+"
+            return(b)
+        }
+        else if (a >= 83) {
+            b = "B"
+            return(b)
+        }
+        else if (a >= 80) {
+            b = "B-"
+            return(b)
+        }
+        else if (a >= 77) {
+            b = "C+"
+            return(b)
+        }
+        else if (a >= 73) {
+            b = "C"
+            return(b)
+        }
+        else if (a >= 70) {
+            b = "C-"
+            return(b)
+        }
+        else if (a >= 67) {
+            b = "D+"
+            return(b)
+        }
+        else if (a >= 63) {
+            b = "D"
+            return(b)
+        }
+        else if (a >= 60) {
+            b = "D-"
+            return(b)
+        }
+        else {
+            b = "F"
+            return(b)
+        }
+    }
+    
+    #Color it function returns color based on grade
+    colorit <- function(grade) {
+        if(grade > 90) {
+            a = "green"
+            return(a)
+        }
+        else if (grade >= 80) {
+            a = "blue"
+            return(a)
+        }
+        else if (grade >= 70) {
+            a = "yellow"
+            return(a)
+        }
+        else if (grade >= 60) {
+            a = "orange"
+            return(a)
+        }
+        else {
+            a = "red"
+            return(a)
+        }
+    }
+    
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+
+
+
+
+
